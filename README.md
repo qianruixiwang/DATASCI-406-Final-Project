@@ -20,7 +20,3 @@ This repository contains supplemental materials for the analysis of how temperat
 - `minPeriodAnnualMeanT`: Annual minimum temperatures.
 - `meanTemp`: The average temperature during the observed period.
 - `periodFrom` and `periodTo`: Time interval.
-
-## Additional Notes
-- Include the complete record of data cleaning steps in `Bumblebee_EDA.Rmd`.
-- Supplementary simulations analyses are available in `Permutation+Monte_Simulation.Rmd` and `MCMC.Rmd`.
