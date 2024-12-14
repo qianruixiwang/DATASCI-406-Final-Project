@@ -1,0 +1,174 @@
+---
+title: "DATA406"
+author: "Zhiling Huang"
+date: "2024-11-26"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Top five bumblebee most likely influence by temperature variations/adpat to cooler environment.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(reshape2)
+
+data_bombclimate <- read.csv("data_bombclimate.csv")
+
+# Filter for the continent NAM
+data_NAM <- data_bombclimate[data_bombclimate$continent == "NAM", ]
+data_NAM <- na.omit(data_NAM)
+
+# Calculate the mean temperature
+data_NAM$meanTemp <- (data_NAM$maxPeriodAnnualMeanT + data_NAM$minPeriodAnnualMeanT) / 2
+
+final_data <- data_NAM[, c("species", "kmNorthEquator", "elevation", 
+                                 "meanTemp", "periodFrom", "periodTo")]
+
+write_csv(final_data, "final_data.csv")
+
+data = read.csv("final_data_1.csv")
+data = data |> mutate(TempVar = maxPeriodAnnualMeanT - minPeriodAnnualMeanT,
+                       PeriodLength = periodTo - periodFrom)
+```
+
+### Model 1
+
+```{r}
+library(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+options(buildtools.check = function(action) TRUE )
+
+y = data$kmNorthEquator
+X = cbind(1, data$TempVar) 
+
+stan_data = list(
+  N = nrow(X),
+  K = ncol(X),
+  X = as.matrix(X),
+  y = y
+)
+
+stan_model1 = "
+data {
+  int<lower=0> N;             // Number of observations
+  int<lower=1> K;             // Number of predictors
+  matrix[N, K] X;             // Predictor matrix
+  vector[N] y;                // Response variable
+}
+parameters {
+  vector[K] beta;             // Regression coefficients
+  real<lower=0> sigma;        // Error standard deviation
+}
+model {
+  // Priors
+  beta ~ normal(0, 100);      // Priors for regression coefficients
+  sigma ~ normal(0, 500);     // Prior for standard deviation
+  
+  // Likelihood
+  y ~ normal(X * beta, sigma); // Linear regression model
+}
+"
+
+fit1 = stan(
+  model_code = stan_model1,
+  data = stan_data,
+  iter = 2000,
+  chains = 4,
+  seed = 123
+)
+
+posterior_samples1 = extract(fit1)
+```
+
+```{r}
+print(fit1)
+trace_plot1 = traceplot(fit1)
+dens_plot1 = stan_dens(fit1)
+
+library(gridExtra)
+grid.arrange(trace_plot1, dens_plot1, ncol = 1)
+```
+```{r}
+fit1_summary = summary(fit1)$summary
+fit1_df = as.data.frame(fit1_summary)
+fit1_df$Parameter = rownames(fit1_summary)
+
+fit1_df[, c("mean", "sd", "2.5%", "97.5%")]
+```
+
+
+### Model 2
+
+```{r}
+stan_model2 = "
+data {
+  int<lower=0> N;             // Number of observations
+  int<lower=1> K;             // Number of predictors
+  matrix[N, K] X;             // Predictor matrix
+  vector[N] y;                // Response variable
+}
+parameters {
+  vector[K] beta;             // Regression coefficients
+  real<lower=0> sigma;        // Error standard deviation
+}
+model {
+  // Priors
+  beta ~ normal(0, 50);       // Priors for regression coefficients
+  sigma ~ normal(0, 300);     // Prior for standard deviation
+  
+  // Likelihood
+  y ~ normal(X * beta, sigma); // Linear regression model
+}
+"
+
+
+fit2 = stan(
+  model_code = stan_model2,
+  data = stan_data,
+  iter = 2000,
+  chains = 4,
+  seed = 123
+)
+
+posterior_samples2 = extract(fit2)
+```
+
+
+```{r}
+print(fit2)
+trace_plot2 = traceplot(fit2)
+dens_plot2 = stan_dens(fit2)
+
+grid.arrange(trace_plot2, dens_plot2, ncol = 1)
+```
+## Comparison
+
+```{r}
+fit1_summary = summary(fit1)$summary
+fit2_summary = summary(fit2)$summary
+
+fit1_df = as.data.frame(fit1_summary)
+fit2_df = as.data.frame(fit2_summary)
+
+fit1_df$Parameter = rownames(fit1_summary)
+fit2_df$Parameter = rownames(fit2_summary)
+
+fit1_df = fit1_df[, c("Parameter", "mean", "sd", "n_eff")]
+fit2_df = fit2_df[, c("Parameter", "mean", "sd", "n_eff")]
+
+colnames(fit1_df)[2:4] = c("mean_fit1", "sd_fit1", "n_eff_fit1")
+colnames(fit2_df)[2:4] = c("mean_fit2", "sd_fit2", "n_eff_fit2")
+
+comparison_df = merge(fit1_df, fit2_df, by = "Parameter")
+print(comparison_df)
+```
+
+

@@ -1,0 +1,120 @@
+---
+title: "Permutation"
+author: "Mong Ning"
+date: "2024-12-8"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## NAM only
+
+```{r}
+library(dplyr)
+data_bombclimate <- read.csv("final_data_1.csv")
+```
+
+```{r Data}
+library(dplyr)
+
+# Add a new column PeriodAnnualVariationTemp
+data_bombclimate <- data_bombclimate %>%
+  mutate(PeriodAnnualVariationTemp = maxPeriodAnnualMeanT - minPeriodAnnualMeanT)
+
+# Get the top 5 species by count
+top_5_species <- data_bombclimate %>%
+  count(species, sort = TRUE) %>%
+  slice(1:5) %>%
+  pull(species)
+
+# Filter the dataset to include only rows for the top 5 species
+data_bombclimate_top5 <- data_bombclimate %>%
+  filter(species %in% top_5_species)
+
+data_bombclimate_top5 
+head(data_bombclimate_top5)
+```
+
+```{r Permutation Model}
+
+# Define early and late periods
+early_period <- data_bombclimate_top5 %>%
+  filter(periodFrom >= 1901 & periodTo <= 1974)
+
+late_period <- data_bombclimate_top5 %>%
+  filter(periodFrom >= 1975 & periodTo <= 2010)
+
+# Extract variables for the permutation test
+latitude_early <- early_period$kmNorthEquator
+latitude_late <- late_period$kmNorthEquator
+
+variation_early <- early_period$PeriodAnnualVariationTemp
+variation_late <- late_period$PeriodAnnualVariationTemp
+
+
+# Permutation test function
+permutation_test <- function(group1, group2, stat_function = median, n_perm = 1000) {
+  # Observed difference
+  observed_diff <- stat_function(group1) - stat_function(group2)
+  
+  # Combine groups
+  combined <- c(group1, group2)
+  
+  # Permute and calculate test statistics
+  perm_diffs <- replicate(n_perm, {
+    shuffled <- sample(combined)
+    perm_group1 <- shuffled[1:length(group1)]
+    perm_group2 <- shuffled[(length(group1) + 1):length(shuffled)]
+    stat_function(perm_group1) - stat_function(perm_group2)
+  })
+  
+  # Calculate p-value
+  p_value <- mean(abs(perm_diffs) >= abs(observed_diff))
+  
+  return(list(observed_diff = observed_diff, p_value = p_value))
+}
+
+# Perform the permutation test for kmNorthEquator
+latitude_result <- permutation_test(latitude_early, latitude_late, stat_function = median, n_perm = 1000)
+
+# Perform the permutation test for PeriodAnnualVariationTemp
+variation_result <- permutation_test(variation_early, variation_late, stat_function = median, n_perm = 1000)
+
+cat("Permutation Test Results:\n")
+cat("Latitude (kmNorthEquator):\n")
+cat("  Observed Difference:", latitude_result$observed_diff, "\n")
+cat("  P-value:", latitude_result$p_value, "\n")
+
+```
+
+## Result Plot
+
+```{r Result Plot}
+
+library(ggplot2)
+
+# Permutation histogram
+perm_diffs_latitude <- replicate(1000, {
+  combined <- c(latitude_early, latitude_late)
+  shuffled <- sample(combined)
+  perm_group1 <- shuffled[1:length(latitude_early)]
+  perm_group2 <- shuffled[(length(latitude_early) + 1):length(shuffled)]
+  median(perm_group1) - median(perm_group2)
+})
+
+latitude_observed <- median(latitude_early) - median(latitude_late)
+
+# Permutation Histogram for Latitude
+ggplot(data.frame(Permuted_Differences = perm_diffs_latitude), aes(x = Permuted_Differences)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  geom_vline(xintercept = latitude_observed, color = "red", linetype = "dashed", size = 1.2) +
+  labs(title = "Permutation Test for Latitude (kmNorthEquator)",
+       x = "Permuted Differences", 
+       y = "Frequency") +
+  theme_minimal()
+
+```

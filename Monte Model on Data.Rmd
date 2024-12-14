@@ -1,0 +1,172 @@
+---
+title: "LRegression406"
+author: "Zhiling Huang"
+date: "2024-11-30"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Monte Carlo for Overall Population
+
+```{r overall}
+library(dplyr)
+library(ggplot2)
+data <- read.csv("final_data_1.csv")
+
+# Add temperature variation
+data <- data %>%
+  mutate(tempVariation = maxPeriodAnnualMeanT - minPeriodAnnualMeanT)
+
+# Monte Carlo simulation function
+monte_carlo_analysis <- function(data, n_iterations = 1000) {
+  results <- replicate(n_iterations, {
+    # Bootstrap sample
+    sample_data <- data[sample(1:nrow(data), replace = TRUE), ]
+    # Linear regression
+    model <- lm(kmNorthEquator ~ tempVariation, data = sample_data)
+    coef(model)
+  })
+  t(results)
+}
+
+# Perform Monte Carlo analysis on the entire dataset
+overall_results <- monte_carlo_analysis(data)
+
+# Summarize results
+slopes1 <- overall_results[, "tempVariation"]
+intercepts1 <- overall_results[, "(Intercept)"]
+
+summary_list1 <- list(
+  Mean_Slope = mean(slopes1),
+  Mean_Intercept = mean(intercepts1),
+  Lower_Bound_CI = quantile(slopes1, 0.025),
+  Upper_Bound_CI = quantile(slopes1, 0.975),
+  Reject_Null = !(0 >= quantile(slopes1, 0.025) & 0 <= quantile(slopes1, 0.975))
+)
+overall_summary_df <- as.data.frame(summary_list1)
+
+print(overall_summary_df)
+
+```
+## Actual VS theortical
+
+```{r plot}
+library(ggplot2)
+theoretical <- rnorm(length(slopes1), mean = mean(slopes1), sd = sd(slopes1))
+
+# Actual and theoretical distributions
+distribution_data <- data.frame(
+  Value = c(slopes1, theoretical),
+  Distribution = rep(c("Actual", "Theoretical"), each = length(slopes1))
+)
+
+ggplot(distribution_data, aes(x = Value, fill = Distribution)) +
+  geom_density(alpha = 0.5) +
+  labs(
+    title = "Actual vs Theoretical Distribution of Slopes",
+    x = "Slope Value (Temperature Variation)",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+## Bootstrapped samples
+
+```{r 11}
+## Bootstrapped Samples
+hist(slopes1, main = "Distribution of Bootstrapped Slopes", xlab = "Slope")
+
+```
+
+#### Break into time interval for overall bumblebee population
+
+```{r 567}
+
+time_periods <- list(
+  c(1901, 1974),
+  c(1975, 1986),
+  c(1987, 1998),
+  c(1999, 2010)
+)
+
+time_interval_result <- list()
+
+for (period in time_periods) {
+  period_data <- data %>%
+    filter(periodFrom >= period[1] & periodTo <= period[2]) 
+  
+  if (nrow(period_data) > 0) {
+    time_interval_result[[paste(period[1], period[2], sep = "-")]] <- monte_carlo_analysis(period_data)
+  }
+}
+
+time_summary_list <- list()
+
+for (period in names(time_interval_result)) {
+  results <- time_interval_result[[period]]
+  slopes <- results[, "tempVariation"]
+  intercepts <- results[, "(Intercept)"]
+  
+  time_summary_list[[period]] <- list(
+    Period = period,
+    Mean_Slope = mean(slopes),
+    Mean_Intercept = mean(intercepts),
+    Lower_Bound_CI = quantile(slopes, 0.025),
+    Upper_Bound_CI = quantile(slopes, 0.975),
+    Reject_Null = !(0 >= quantile(slopes, 0.025) & 0 <= quantile(slopes, 0.975))
+  )
+}
+
+new_summary_df <- do.call(rbind, lapply(time_summary_list, as.data.frame))
+
+new_summary_df
+```
+
+## change of slope over time
+
+```{r newplot}
+
+time_summary_df <- do.call(rbind, lapply(time_summary_list, as.data.frame))
+time_summary_df$Period <- factor(time_summary_df$Period, levels = c("1901-1974", "1975-1986", "1987-1998", "1999-2010"))
+
+ggplot(time_summary_df, aes(x = Period, y = Mean_Slope, fill = Period)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_errorbar(aes(ymin = Lower_Bound_CI, ymax = Upper_Bound_CI), width = 0.2) +
+  labs(
+    title = "Changes in Slope Across Time Periods",
+    x = "Time Period",
+    y = "Mean Slope (Temperature Variation vs Migration)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### Linear Regression
+
+Simple OLS
+
+```{r 555}
+
+model <- lm(kmNorthEquator ~ tempVariation + maxPeriodAnnualMeanT, data = data)
+summary(model)
+par(mfrow = c(2, 2)) 
+plot(model)
+```
+
+#### Spline for Non-linearity
+
+```{r p1}
+library(splines)
+model_spline <- lm(kmNorthEquator ~ ns(tempVariation, df = 3), data = data)
+summary(model_spline)
+
+par(mfrow = c(2, 2)) 
+plot(model_spline)
+```
+Adding non-linear terms doesn't seems to improve overall r-squared values, in this case we can conclude a positive linear relationship between temperature and kmNorthequator should be as sufficient as non-linear coefficient.  

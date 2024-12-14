@@ -1,0 +1,204 @@
+---
+title: "BumbleDataEDA"
+author: "Zhiling Huang"
+date: "2024-12-08"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Cleaning
+
+```{r Data Cleaning}
+library(dplyr)
+library(ggplot2)
+
+data_bombclimate <- read.csv("data_bombclimate.csv")
+
+# Filter for the continent NAM
+data_NAM <- data_bombclimate[data_bombclimate$continent == "NAM", ]
+data_NAM <- na.omit(data_NAM)
+
+# Calculate the mean temperature
+data_NAM$meanTemp <- (data_NAM$maxPeriodAnnualMeanT + data_NAM$minPeriodAnnualMeanT) / 2
+
+final_data <- data_NAM[, c("species", "kmNorthEquator", "elevation",
+                           "periodFrom", "periodTo","meanTemp",
+                           "maxPeriodAnnualMeanT", "minPeriodAnnualMeanT")]
+
+head(final_data)
+## Sample Size ~ 86673
+summary(final_data)
+```
+
+
+
+### Plot 1: Migration patterns 
+
+```{r p1}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+
+# Read the data
+data <- read.csv("final_data_1.csv")
+
+# Prepare data for migration analysis: calculate average latitude per species over each period
+migration_data <- data %>%
+  group_by(species, periodFrom) %>%
+  summarize(Average_Latitude = mean(kmNorthEquator, na.rm = TRUE)) %>%
+  ungroup()
+
+# Select top 5 most common species
+top_species <- data %>%
+  count(species, sort = TRUE) %>%
+  top_n(10) %>%
+  pull(species)
+
+# Filter data to only include top species
+filtered_migration_data <- migration_data %>%
+  filter(species %in% top_species)
+
+# Plot migration patterns for the selected species
+ggplot(filtered_migration_data, aes(x = periodFrom, y = Average_Latitude, color = species)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Migration Patterns of Top Bumblebee Species Over Time",
+       x = "Starting Year of Period", y = "Average Latitude (km from Equator)",
+       color = "Species") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+```
+### Plot 2: Correlation Plot
+
+```{r p5}
+library(ggplot2)
+library(GGally)
+data$temperature_variation <- data$maxPeriodAnnualMeanT - data$minPeriodAnnualMeanT
+ggpairs(data[, c("kmNorthEquator", "temperature_variation")],
+        title = "Pairwise Relationships Among Key Variables")
+```
+
+## Plot 3: Change in elevation of 31 bumblebee species by 1999 to 2010 relative to their mean latitude
+
+```{r mean elevation}
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+data <- read.csv("final_data_1.csv")
+
+time_intervals <- unique(data$periodTo)
+
+species_summary <- data %>%
+  group_by(species, periodTo) %>%
+  summarize(
+    mean_elevation = mean(elevation, na.rm = TRUE),
+    mean_latitude = mean(kmNorthEquator, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+plots <- list()
+for (interval in time_intervals) {
+  # Filter data for the current time interval
+  interval_data <- species_summary %>%
+    filter(periodTo == interval)
+  
+  p <- ggplot(interval_data, aes(x = mean_latitude, y = mean_elevation)) +
+    geom_point(color = "blue") +
+    geom_smooth(method = "lm", color = "red", se = TRUE) +
+    labs(
+      title = paste("Mean Elevation vs Latitude ", interval),
+      x = "Mean Latitude (km North of Equator)",
+      y = "Mean Elevation (m)"
+    ) +
+    theme_minimal()
+  
+  plots[[as.character(interval)]] <- p
+}
+
+grid.arrange(grobs = plots, ncol = 2)
+
+```
+
+Notes: In time from 1999 to 2010, the trend line shows a slight negative slope, indicating that bumblebee species at higher latitudes might be occupying lower elevations compared to those at lower latitudes.
+This could reflect the influence of climate change, where higher latitude species face constraints on elevation ranges due to warming conditions.
+
+## Plot 4: Change in Temp Vs Mean Latitude
+
+```{r TempVariation}
+library(ggplot2)
+library(dplyr)
+
+data <- data %>%
+  mutate(temperature_variation = maxPeriodAnnualMeanT - minPeriodAnnualMeanT)
+
+# Calculate the mean temperature variation and latitude for each species by time interval
+species_temp_summary <- data %>%
+  group_by(species, periodTo) %>%
+  summarize(
+    mean_temp_variation = mean(temperature_variation, na.rm = TRUE),
+    mean_latitude = mean(kmNorthEquator, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+ggplot(species_temp_summary, aes(x = mean_latitude, y = mean_temp_variation)) +
+  geom_point(color = "blue") +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  facet_wrap(~periodTo, scales = "free") +  # Create one panel per time interval
+  labs(
+    title = "Mean Temperature Variation vs Latitude Across Time Intervals",
+    x = "Mean Latitude (km North of Equator)",
+    y = "Mean Temperature Variation (°C)"
+  ) +
+  theme_minimal()
+
+```
+
+Positive Correlation: In all time intervals, the red lines show a positive slope, suggesting that as the latitude increases (moving further north), the mean temperature variation tends to increase.
+Strength of the Relationship:
+The steepness of the regression line indicates the strength of the relationship. In some intervals (e.g., 1998, 2010), the slope is steeper, suggesting a stronger correlation between latitude and temperature variation.
+Consistency Across Intervals: The positive relationship between latitude and temperature variation appears to be consistent across all intervals, but the magnitude of the variation differs.
+
+## Plot 5: Mean Latitude Across time interval
+
+```{r TimeInterval}
+species_latitude_summary <- data %>%
+  group_by(species, periodTo) %>%
+  summarize(mean_latitude = mean(kmNorthEquator, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot latitude across time intervals
+ggplot(species_latitude_summary, aes(x = as.factor(periodTo), y = mean_latitude)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  geom_jitter(width = 0.2, alpha = 0.5, color = "red") +
+  labs(
+    title = "Mean Latitude Across Time Intervals",
+    x = "Time Interval",
+    y = "Mean Latitude (km North of Equator)"
+  ) +
+  theme_minimal()
+```
+
+### Plot 6: Density/Histogram of Response
+
+```{r plotnew}
+library(ggplot2)
+
+data <- data %>%
+  mutate(tempVariation = maxPeriodAnnualMeanT - minPeriodAnnualMeanT)
+
+hist(data$kmNorthEquator, main = "Histogram of Distance from Equator", xlab = "Distance from equator", probability = TRUE)
+
+# Density plot
+plot(density(data$kmNorthEquator), main = "Density Plot")
+# Q-Q plot
+qqnorm(data$kmNorthEquator)
+qqline(data$kmNorthEquator, col = "red")
+
+```

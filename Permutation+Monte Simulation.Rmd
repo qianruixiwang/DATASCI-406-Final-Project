@@ -1,0 +1,245 @@
+---
+title: "Permutation+Monte"
+author: "Zhiling Huang"
+date: "2024-12-06"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Monte Carlo Simulation
+
+Testing for different relationship, linear, quadratic, and cubic.
+
+```{r p1}
+set.seed(42)
+
+# Testing Parameters
+n_simulations <- 1000   
+sample_size <- 50       # sample size
+true_effect <- 0.3      # True relationship under H_a
+noise_sd <- 0.5         # Standard deviation
+alpha <- 0.05           # Significance level
+
+# Simulation Function
+simulate_and_analyze <- function(effect, dependency = "linear",
+                                  n_simulations, sample_size, noise_sd, alpha) {
+  
+  # Result Storage
+  test_statistics_null <- numeric(n_simulations)
+  test_statistics_alt <- numeric(n_simulations)
+  p_values_null <- numeric(n_simulations)
+  p_values_alt <- numeric(n_simulations)
+  
+  # Generate data under normal distribution
+  simulate_data <- function(n, effect, noise_sd, hypothesis = "null", dependency) {
+    # Normal distribution for temperature variation
+    temp_variation <- rnorm(n, mean = 0, sd = 1)  
+    if (hypothesis == "null") {
+       # No relationship
+      range_shift <- rnorm(n, mean = 0, sd = noise_sd) 
+    } else {
+      if (dependency == "linear") {
+        range_shift <- effect * temp_variation + rnorm(n, mean = 0, sd = noise_sd)  # Linear
+      } else if (dependency == "quadratic") {
+        range_shift <- effect * (temp_variation^2) + rnorm(n, mean = 0, sd = noise_sd)  # Quadratic
+      } else if (dependency == "cubic") {
+        range_shift <- effect * (temp_variation^3) + rnorm(n, mean = 0, sd = noise_sd)  # Cubic
+      } else {
+        stop("Invalid")
+      }
+    }
+    list(temp_variation = temp_variation, range_shift = range_shift)
+  }
+  
+  # Monte Carlo Simulations
+  for (sim in 1:n_simulations) {
+    # Null hypothesis
+    null_data <- simulate_data(sample_size, effect, noise_sd, hypothesis = "null", dependency)
+    test_statistics_null[sim] <- cor(null_data$temp_variation, null_data$range_shift)
+    p_values_null[sim] <- cor.test(null_data$temp_variation, null_data$range_shift)$p.value
+    
+    # Alternative hypothesis
+    alt_data <- simulate_data(sample_size, effect, noise_sd, hypothesis = "alternative", dependency)
+    test_statistics_alt[sim] <- cor(alt_data$temp_variation, alt_data$range_shift)
+    p_values_alt[sim] <- cor.test(alt_data$temp_variation, alt_data$range_shift)$p.value
+  }
+  
+  # Calculate Metrics
+  type1_error <- mean(p_values_null < alpha)
+  power <- mean(p_values_alt < alpha)
+  bias <- mean(test_statistics_alt) - effect
+  
+  cat("Dependency:", dependency, "\n")
+  cat("Type I Error Rate:", type1_error, "\n")
+  cat("Power:", power, "\n")
+  cat("Bias:", bias, "\n\n")
+  
+  library(ggplot2)
+  data <- data.frame(
+    test_statistic = c(test_statistics_null, test_statistics_alt),
+    label = factor(rep(c("Null", "Alternative"), each = n_simulations))
+  )
+  
+  ggplot(data, aes(x = test_statistic, fill = label, color = label)) +
+    geom_density(alpha = 0.5) +
+    labs(title = paste("Distribution of Test Statistics (", dependency, ")", sep = ""),
+         x = "Test Statistic", y = "Density") +
+    theme_minimal() +
+    theme(legend.title = element_blank())
+}
+
+simulate_and_analyze(true_effect, dependency = "linear",
+                     n_simulations, sample_size, noise_sd, alpha)
+simulate_and_analyze(true_effect, dependency = "quadratic",
+                     n_simulations, sample_size, noise_sd, alpha)
+simulate_and_analyze(true_effect, dependency = "cubic",
+                     n_simulations, sample_size, noise_sd, alpha)
+
+```
+
+## Permutation
+
+Simulating under different conditions
+
+```{r p2}
+# Testing Parameters
+n_simulations <- 500
+n_permutations <- 100
+n_samples <- 100
+true_slope_ha <- 0.5  # Slope under the alternative hypothesis
+alpha <- 0.05
+
+# Function for permutation test
+permutation_test <- function(x, y, test_stat = "mean", n_permutations = 100) {
+  observed_stat <- if (test_stat == "mean") mean(x * y) else median(x * y)
+  
+  permuted_stats <- replicate(n_permutations, {
+    ## Shuffling y
+    permuted_y <- sample(y)
+    if (test_stat == "mean") mean(x * permuted_y) else median(x * permuted_y)
+  })
+  
+  p_value <- mean(abs(permuted_stats) >= abs(observed_stat))
+  return(p_value)
+}
+
+# Function to calculate test statistic distribution
+calculate_test_stat_distribution <- function(x_dist, y_dist, test_stat = "mean", n_samples, n_simulations) {
+  stats <- numeric(n_simulations)
+  for (i in 1:n_simulations) {
+    x <- x_dist(n_samples)
+    y <- y_dist(n_samples)
+    stats[i] <- if (test_stat == "mean") mean(x * y) else median(x * y)
+  }
+  return(stats)
+}
+
+# Function for Kolmogorov-Smirnov Test
+calculate_ks_statistic <- function(null_stats, alt_stats) {
+  ks_result <- ks.test(null_stats, alt_stats)
+  return(ks_result$statistic)
+}
+
+# Distributions to test
+distributions <- list(
+  Normal = rnorm,
+  Uniform = runif,
+  Exponential = rexp,
+  Lognormal = rlnorm,
+  Gamma = function(n) rgamma(n, shape = 2, rate = 1)  # Adjustable shape/rate parameters
+)
+
+# Results storage
+results <- data.frame(
+  Distribution = character(),
+  Test_Statistic = character(),
+  Type_I_Error = numeric(),
+  Power = numeric(),
+  KS_Statistic = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Simulation for each distribution and test statistic
+par(mfrow = c(2, 2))
+for (dist_name in names(distributions)) {
+  dist_func <- distributions[[dist_name]]
+  
+  for (stat in c("mean", "median")) {
+    type_I_error <- 0
+    power <- 0
+    
+    # Null hypothesis simulations
+    null_stats <- numeric(n_simulations)
+    for (i in 1:n_simulations) {
+      x <- dist_func(n_samples)
+      y <- dist_func(n_samples)  # No relationship
+      null_stats[i] <- if (stat == "mean") mean(x * y) else median(x * y)
+      p_value <- permutation_test(x, y, test_stat = stat, n_permutations = n_permutations)
+      if (p_value < alpha) {
+        type_I_error <- type_I_error + 1
+      }
+    }
+    
+    # Alternative hypothesis simulations
+    alt_stats <- numeric(n_simulations)
+    for (i in 1:n_simulations) {
+      x <- dist_func(n_samples)
+      y <- true_slope_ha * x + rnorm(n_samples)  # Linear relationship
+      alt_stats[i] <- if (stat == "mean") mean(x * y) else median(x * y)
+      p_value <- permutation_test(x, y, test_stat = stat, n_permutations = n_permutations)
+      if (p_value < alpha) {
+        power <- power + 1
+      }
+    }
+    
+    # Kolmogorov-Smirnov Test
+    ks_stat <- calculate_ks_statistic(null_stats, alt_stats)
+    
+    results <- rbind(results, data.frame(
+      Distribution = dist_name,
+      Test_Statistic = stat,
+      Type_I_Error = type_I_error / n_simulations,
+      Power = power / n_simulations,
+      KS_Statistic = ks_stat
+    ))
+    
+    # Plot the distributions
+    hist(null_stats, breaks = 30, freq = FALSE, col = "lightblue", main = paste(dist_name, "-", stat),
+         xlab = "Test Statistic", ylab = "Density")
+    lines(density(null_stats), col = "blue", lwd = 2)
+
+    hist(alt_stats, breaks = 30, freq = FALSE, col = "pink", main = paste(dist_name, "-", stat),
+         xlab = "Test Statistic", ylab = "Density", add = TRUE)
+    lines(density(alt_stats), col = "red", lwd = 2)
+    legend("topright", legend = c("Null", "Alternative"), fill = c("lightblue", "pink"))
+  }
+}
+
+print(results)
+
+```
+
+```{r 123}
+# Split data
+split_results <- split(results, results$Distribution)
+
+# Separate data frame
+normal_df <- split_results[["Normal"]]
+uniform_df <- split_results[["Uniform"]]
+exponential_df <- split_results[["Exponential"]]
+lognormal_df <- split_results[["Lognormal"]]
+gamma_df <- split_results[["Gamma"]]
+
+exponential_df
+lognormal_df
+gamma_df
+```
+
+
+
+
